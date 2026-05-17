@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Fallback Hintergrund, damit es sofort dunkel wird */
+body {
+  background-color: #0f172a; 
+  color: #f8fafc;
+}
