@@ -6,7 +6,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    container_name: nutrition-api
+    container_name: macrobandit-api
     # PORTS WURDEN ENTFERNT: Portainer behält Port 8000, API kommuniziert nur noch intern!
     volumes:
       - ./backend:/app
@@ -26,7 +26,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
-    container_name: nutrition-pwa
+    container_name: macrobandit-pwa
     ports:
       - "80:80"
     depends_on:
