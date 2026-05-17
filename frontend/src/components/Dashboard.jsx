@@ -10,15 +10,9 @@ const DEFAULT_GOALS = {
 }
 
 const COLORS = [
-  'from-pink-500 to-rose-500',
-  'from-purple-500 to-indigo-500',
-  'from-blue-500 to-cyan-500',
-  'from-teal-500 to-emerald-500',
-  'from-green-500 to-lime-500',
-  'from-yellow-500 to-amber-500',
-  'from-orange-500 to-red-500',
-  'from-fuchsia-500 to-pink-500',
-  'from-violet-500 to-purple-500',
+  'from-pink-500 to-rose-500', 'from-purple-500 to-indigo-500', 'from-blue-500 to-cyan-500',
+  'from-teal-500 to-emerald-500', 'from-green-500 to-lime-500', 'from-yellow-500 to-amber-500',
+  'from-orange-500 to-red-500', 'from-fuchsia-500 to-pink-500', 'from-violet-500 to-purple-500',
   'from-sky-500 to-blue-600',
 ]
 
@@ -30,24 +24,10 @@ export default function Dashboard() {
     return saved ? parseInt(saved, 10) : 1
   })
 
-  // Dynamische Liste der 10 User-Namen aus dem lokalen Speicher laden
-  const [userNames, setUserNames] = useState(() => {
-    const list = []
-    for (let i = 1; i <= 10; i++) {
-      const savedName = localStorage.getItem('user_custom_name_' + i)
-      list.push({
-        id: i,
-        name: savedName || ('Benutzer ' + i),
-        color: COLORS[i - 1]
-      })
-    }
-    return list
-  })
-
-  const [macroGoals, setMacroGoals] = useState(() => {
-    const savedUser = localStorage.getItem('active_user_id') || '1'
-    const saved = localStorage.getItem('macro_goals_user_' + savedUser)
-    return saved ? JSON.parse(saved) : DEFAULT_GOALS
+  const [userProfiles, setUserProfiles] = useState(() => {
+    return Array.from({ length: 10 }, (_, i) => ({
+      id: i + 1, name: 'Lade...', kcal: 2800, protein: 200, carbs: 320, fat: 80, color: COLORS[i]
+    }))
   })
 
   const [totals, setTotals] = useState(null)
@@ -79,26 +59,30 @@ export default function Dashboard() {
   const [goalInputFat, setGoalInputFat] = useState('')
   const [nameInput, setNameInput] = useState('')
 
+  const currentUser = userProfiles.find(u => u.id === activeUser) || userProfiles[0]
+
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const res = await axios.get(API_BASE + '/users')
+        setUserProfiles(res.data.map(u => ({ ...u, color: COLORS[u.id - 1] })))
+      } catch (err) { console.error(err) }
+    }
+    fetchUsers()
+    loadFoods()
+  }, [])
+
   useEffect(() => {
     localStorage.setItem('active_user_id', activeUser)
-    const savedGoals = localStorage.getItem('macro_goals_user_' + activeUser)
-    setMacroGoals(savedGoals ? JSON.parse(savedGoals) : DEFAULT_GOALS)
     loadDashboard()
-    loadFoods()
   }, [activeUser])
 
   useEffect(() => {
-    if (success) {
-      const timer = setTimeout(() => setSuccess(null), 3000)
-      return () => clearTimeout(timer)
-    }
+    if (success) { const t = setTimeout(() => setSuccess(null), 3000); return () => clearTimeout(t) }
   }, [success])
 
   useEffect(() => {
-    if (error) {
-      const timer = setTimeout(() => setError(null), 5000)
-      return () => clearTimeout(timer)
-    }
+    if (error) { const t = setTimeout(() => setError(null), 5000); return () => clearTimeout(t) }
   }, [error])
 
   const loadDashboard = async () => {
@@ -110,191 +94,95 @@ export default function Dashboard() {
       ])
       setTotals(totalsRes.data)
       setLogs(logsRes.data)
-      setError(null)
-    } catch (err) {
-      console.error(err)
-      setError('Fehler beim Laden der Daten')
-    } finally {
-      setLoading(false)
-    }
+    } catch (err) { console.error(err) } finally { setLoading(false) }
   }
 
   const loadFoods = async () => {
     try {
       const res = await axios.get(API_BASE + '/foods')
       setFoods(res.data)
-    } catch (err) {
-      console.error(err)
-    }
+    } catch (err) { console.error(err) }
   }
 
-  const handleBarcodeScanned = async (barcode) => {
-    setShowScanner(false)
+  const handleSaveProfile = async (e, mode) => {
+    e.preventDefault()
     setApiLoading(true)
     try {
-      const res = await axios.get(API_BASE + '/barcode/' + barcode)
-      setSelectedFood({
-        id: -1,
-        name: res.data.name,
-        brand: res.data.brand,
-        calories_per_100g: res.data.calories_per_100g,
-        protein_per_100g: res.data.protein_per_100g,
-        carbs_per_100g: res.data.carbs_per_100g,
-        fat_per_100g: res.data.fat_per_100g,
-      })
-      setActiveTab('search')
-      setShowAddManual(true)
-      setError(null)
+      const payload = {
+        name: mode === 'name' ? nameInput.trim() : currentUser.name,
+        kcal: mode === 'goals' ? parseInt(goalInputKcal, 10) : currentUser.kcal,
+        protein: mode === 'goals' ? parseInt(goalInputProtein, 10) : currentUser.protein,
+        carbs: mode === 'goals' ? parseInt(goalInputCarbs, 10) : currentUser.carbs,
+        fat: mode === 'goals' ? parseInt(goalInputFat, 10) : currentUser.fat,
+      }
+      
+      await axios.post(API_BASE + '/users/' + activeUser, payload)
+      setUserProfiles(prev => prev.map(u => u.id === activeUser ? { ...u, ...payload } : u))
+      
+      if (mode === 'name') setShowEditName(false)
+      if (mode === 'goals') setShowEditGoals(false)
+      
+      setSuccess('Profil erfolgreich auf dem Server aktualisiert!')
     } catch (err) {
-      setError('Produkt nicht gefunden. Bitte manuell anlegen.')
-      setActiveTab('custom')
-      setShowAddManual(true)
+      setError('Fehler bei der Server-Synchronisation')
     } finally {
       setApiLoading(false)
     }
+  }
+
+  const handleOpenEditName = () => { setNameInput(currentUser.name); setShowEditName(true) }
+  const handleOpenEditGoals = () => { 
+    setGoalInputKcal(currentUser.kcal); setGoalInputProtein(currentUser.protein); 
+    setGoalInputCarbs(currentUser.carbs); setGoalInputFat(currentUser.fat); 
+    setShowEditGoals(true) 
+  }
+
+  const handleBarcodeScanned = async (barcode) => {
+    setShowScanner(false); setApiLoading(true)
+    try {
+      const res = await axios.get(API_BASE + '/barcode/' + barcode)
+      setSelectedFood({ id: -1, ...res.data })
+      setActiveTab('search'); setShowAddManual(true)
+    } catch (err) {
+      setError('Nicht gefunden. Bitte manuell anlegen.'); setActiveTab('custom'); setShowAddManual(true)
+    } finally { setApiLoading(false) }
   }
 
   const handleAddMeal = async () => {
     if (!selectedFood || !amount) return
-    const amountNum = parseFloat(amount)
-    if (isNaN(amountNum) || amountNum <= 0) {
-      setError('Menge muss eine positive Zahl sein')
-      return
-    }
     setApiLoading(true)
     try {
-      let currentFoodId = selectedFood.id
-      if (currentFoodId === -1) {
-        const newFoodResponse = await axios.post(API_BASE + '/foods', {
-          name: selectedFood.name,
-          brand: selectedFood.brand || '',
-          calories_per_100g: selectedFood.calories_per_100g,
-          protein_per_100g: selectedFood.protein_per_100g,
-          carbs_per_100g: selectedFood.carbs_per_100g,
-          fat_per_100g: selectedFood.fat_per_100g,
-        })
-        currentFoodId = newFoodResponse.data.id
-        loadFoods()
+      let currentId = selectedFood.id
+      if (currentId === -1) {
+        const nf = await axios.post(API_BASE + '/foods', selectedFood)
+        currentId = nf.data.id; loadFoods()
       }
-      await axios.post(API_BASE + '/logs?user_id=' + activeUser, {
-        food_item_id: currentFoodId,
-        amount_grams: amountNum,
-      })
+      await axios.post(API_BASE + '/logs?user_id=' + activeUser, { food_item_id: currentId, amount_grams: parseFloat(amount) })
       setSuccess(selectedFood.name + ' hinzugefügt')
-      setSelectedFood(null)
-      setAmount('')
-      setShowAddManual(false)
-      await loadDashboard()
-    } catch (err) {
-      setError('Fehler beim Speichern')
-    } finally {
-      setApiLoading(false)
-    }
+      setSelectedFood(null); setAmount(''); setShowAddManual(false); loadDashboard()
+    } catch (err) { setError('Fehler') } finally { setApiLoading(false) }
   }
 
   const handleCreateCustomMeal = async (e) => {
     e.preventDefault()
-    if (!customName || !customKcal || !customAmount) {
-      setError('Bitte Name, Kalorien und Menge eingeben')
-      return
-    }
     setApiLoading(true)
     try {
-      const g = parseFloat(customAmount)
-      const factor = 100 / g
-      const kcal100 = parseFloat(customKcal) * factor
-      const p100 = (parseFloat(customProtein) || 0) * factor
-      const c100 = (parseFloat(customCarbs) || 0) * factor
-      const f100 = (parseFloat(customFat) || 0) * factor
-
-      const newFood = await axios.post(API_BASE + '/foods', {
-        name: customName,
-        brand: 'Manuell',
-        calories_per_100g: kcal100,
-        protein_per_100g: p100,
-        carbs_per_100g: c100,
-        fat_per_100g: f100,
+      const f = 100 / parseFloat(customAmount)
+      const nf = await axios.post(API_BASE + '/foods', {
+        name: customName, brand: 'Manuell', calories_per_100g: parseFloat(customKcal) * f,
+        protein_per_100g: (parseFloat(customProtein) || 0) * f, carbs_per_100g: (parseFloat(customCarbs) || 0) * f, fat_per_100g: (parseFloat(customFat) || 0) * f,
       })
-
-      await axios.post(API_BASE + '/logs?user_id=' + activeUser, {
-        food_item_id: newFood.data.id,
-        amount_grams: g,
-      })
-
-      setSuccess(customName + ' dauerhaft gespeichert & eingetragen!')
-      setCustomName('')
-      setCustomKcal('')
-      setCustomProtein('')
-      setCustomCarbs('')
-      setCustomFat('')
-      setCustomAmount('')
-      setShowAddManual(false)
-      loadFoods()
-      await loadDashboard()
-    } catch (err) {
-      setError('Fehler beim Erstellen')
-    } finally {
-      setApiLoading(false)
-    }
-  }
-
-  const handleOpenEditGoals = () => {
-    setGoalInputKcal(macroGoals.calories)
-    setGoalInputProtein(macroGoals.protein)
-    setGoalInputCarbs(macroGoals.carbs)
-    setGoalInputFat(macroGoals.fat)
-    setShowEditGoals(true)
-  }
-
-  const handleSaveGoals = (e) => {
-    e.preventDefault()
-    const newGoals = {
-      calories: parseInt(goalInputKcal, 10) || DEFAULT_GOALS.calories,
-      protein: parseInt(goalInputProtein, 10) || DEFAULT_GOALS.protein,
-      carbs: parseInt(goalInputCarbs, 10) || DEFAULT_GOALS.carbs,
-      fat: parseInt(goalInputFat, 10) || DEFAULT_GOALS.fat,
-    }
-    setMacroGoals(newGoals)
-    localStorage.setItem('macro_goals_user_' + activeUser, JSON.stringify(newGoals))
-    setShowEditGoals(false)
-    setSuccess('Tagesziele erfolgreich aktualisiert!')
-  }
-
-  const handleOpenEditName = () => {
-    setNameInput(currentUser.name)
-    setShowEditName(true)
-  }
-
-  const handleSaveName = (e) => {
-    e.preventDefault()
-    if (!nameInput.trim()) return
-    const updatedName = nameInput.trim()
-    localStorage.setItem('user_custom_name_' + activeUser, updatedName)
-    setUserNames(prev => prev.map(u => u.id === activeUser ? { ...u, name: updatedName } : u))
-    setShowEditName(false)
-    setSuccess('Name erfolgreich in ' + updatedName + ' geändert!')
+      await axios.post(API_BASE + '/logs?user_id=' + activeUser, { food_item_id: nf.data.id, amount_grams: parseFloat(customAmount) })
+      setSuccess('Mahlzeit eingetragen!'); setShowAddManual(false); loadFoods(); loadDashboard()
+      setCustomName(''); setCustomAmount(''); setCustomKcal(''); setCustomProtein(''); setCustomCarbs(''); setCustomFat('')
+    } catch (err) { setError('Fehler') } finally { setApiLoading(false) }
   }
 
   const handleDeleteLog = async (logId) => {
-    if (!window.confirm('Eintrag löschen?')) return
-    try {
-      await axios.delete(API_BASE + '/logs/' + logId)
-      setSuccess('Eintrag gelöscht')
-      await loadDashboard()
-    } catch (err) {
-      setError('Fehler beim Löschen')
-    }
+    if (window.confirm('Löschen?')) { await axios.delete(API_BASE + '/logs/' + logId); loadDashboard() }
   }
 
-  const currentUser = userNames.find(u => u.id === activeUser)
-
-  if (loading && !totals) {
-    return (
-      <div className="flex items-center justify-center h-screen bg-slate-900 text-white">
-        <div className="text-center font-bold text-xl">Lade Cockpit...</div>
-      </div>
-    )
-  }
+  if (loading && !totals) return <div className="h-screen bg-slate-900 flex justify-center items-center text-white font-bold">Lade Cockpit...</div>
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 pb-32 px-4 pt-4 safe-top safe-bottom relative selection:bg-pink-500 selection:text-white flex flex-col">
@@ -307,31 +195,16 @@ export default function Dashboard() {
 
         <div className="mb-6 bg-slate-800/80 p-5 rounded-3xl border border-slate-700 shadow-xl">
           <div className="flex justify-between items-center mb-3">
-            <label className="block text-xs font-black uppercase tracking-widest text-slate-400">
-              👥 Aktiver Benutzer
-            </label>
-            <button 
-              onClick={handleOpenEditName}
-              className="text-xs bg-slate-700 hover:bg-slate-600 text-cyan-400 px-3 py-1 rounded-xl font-bold border border-slate-600 shadow transition-all active:scale-95"
-            >
-              ✏️ Name ändern
-            </button>
+            <label className="block text-xs font-black uppercase tracking-widest text-slate-400">👥 Profil Server-Sync</label>
+            <button onClick={handleOpenEditName} className="text-xs bg-slate-700 hover:bg-slate-600 text-cyan-400 px-3 py-1 rounded-xl font-bold border border-slate-600 shadow">✏️ Name ändern</button>
           </div>
           <div className="relative">
-            <select
-              value={activeUser}
-              onChange={(e) => setActiveUser(parseInt(e.target.value, 10))}
-              className={'w-full appearance-none bg-gradient-to-r ' + currentUser.color + ' text-white font-black text-lg py-4 px-5 rounded-2xl shadow-lg focus:outline-none focus:ring-4 focus:ring-white/20 outline-none border border-slate-600 cursor-pointer'}
-            >
-              {userNames.map((user) => (
-                <option key={user.id} value={user.id} className="bg-slate-800 text-white font-bold py-2">
-                  👤 {user.name}
-                </option>
+            <select value={activeUser} onChange={(e) => setActiveUser(parseInt(e.target.value, 10))} className={'w-full appearance-none bg-gradient-to-r ' + currentUser.color + ' text-white font-black text-lg py-4 px-5 rounded-2xl shadow-lg outline-none border border-slate-600 cursor-pointer'}>
+              {userProfiles.map((user) => (
+                <option key={user.id} value={user.id} className="bg-slate-800 text-white font-bold py-2">👤 {user.name}</option>
               ))}
             </select>
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-6 text-white">
-              <span className="text-xl font-bold">▼</span>
-            </div>
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-6 text-white text-xl font-bold">▼</div>
           </div>
         </div>
 
@@ -339,54 +212,29 @@ export default function Dashboard() {
           <div>
             <div className="flex items-center gap-2">
               <span className={'w-3 h-3 rounded-full bg-gradient-to-r ' + currentUser.color + ' animate-ping'} />
-              <h1 className="text-3xl font-black tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">
-                {currentUser.name}s Cockpit
-              </h1>
+              <h1 className="text-3xl font-black tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">{currentUser.name}s Cockpit</h1>
             </div>
-            <p className="text-sm text-slate-400 font-bold mt-1">
-              {new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}
-            </p>
+            <p className="text-sm text-slate-400 font-bold mt-1">{new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
           </div>
-          <div className="flex gap-2">
-            <button 
-              onClick={() => setShowScanner(true)}
-              className="h-14 px-5 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-slate-950 font-black shadow-lg flex items-center gap-2 hover:scale-105 active:scale-95 transition-all"
-            >
-              📷 Scanner
-            </button>
-          </div>
+          <button onClick={() => setShowScanner(true)} className="h-14 px-5 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 text-slate-950 font-black shadow-lg flex items-center gap-2 hover:scale-105 active:scale-95 transition-all">📷 Scanner</button>
         </div>
 
         {totals && (
           <>
             <div className="bg-gradient-to-br from-slate-800 via-slate-800 to-slate-900 rounded-3xl p-6 shadow-2xl border border-slate-700 mb-6 relative overflow-hidden">
               <div className={'absolute -right-16 -top-16 w-48 h-48 bg-gradient-to-br ' + currentUser.color + ' opacity-20 rounded-full blur-3xl pointer-events-none'} />
-              
               <div className="flex justify-between items-start mb-2">
                 <h2 className="text-slate-400 text-xs uppercase tracking-widest font-black">Kalorienübersicht</h2>
-                <button 
-                  onClick={handleOpenEditGoals}
-                  className="text-xs bg-slate-700 hover:bg-slate-600 text-amber-400 px-3 py-1.5 rounded-xl font-black shadow border border-slate-600"
-                >
-                  ⚙️ Ziele ändern
-                </button>
+                <button onClick={handleOpenEditGoals} className="text-xs bg-slate-700 text-amber-400 px-3 py-1.5 rounded-xl font-black shadow border border-slate-600">⚙️ Ziele ändern</button>
               </div>
-              
               <div className="flex items-end gap-2 mb-4">
                 <span className="text-6xl font-black tracking-tight text-white">{Math.round(totals.total_calories || 0)}</span>
-                <span className="text-slate-400 font-black mb-1.5 text-base">/ {macroGoals.calories} kcal</span>
+                <span className="text-slate-400 font-black mb-1.5 text-base">/ {currentUser.kcal} kcal</span>
               </div>
-              
               <div className="bg-slate-900/50 rounded-2xl p-4 border border-slate-800">
-                <div className="flex justify-between text-xs font-black text-slate-300 mb-2">
-                  <span>Fortschritt</span>
-                  <span>{Math.round(((totals.total_calories || 0) / macroGoals.calories) * 100)}%</span>
-                </div>
+                <div className="flex justify-between text-xs font-black text-slate-300 mb-2"><span>Fortschritt</span><span>{Math.round(((totals.total_calories || 0) / currentUser.kcal) * 100)}%</span></div>
                 <div className="w-full bg-slate-800 h-4 rounded-full overflow-hidden p-0.5 border border-slate-700">
-                  <div 
-                    className={'bg-gradient-to-r ' + currentUser.color + ' h-full rounded-full transition-all duration-1000 ease-out'}
-                    style={{ width: Math.min(((totals.total_calories || 0) / macroGoals.calories) * 100, 100) + '%' }}
-                  />
+                  <div className={'bg-gradient-to-r ' + currentUser.color + ' h-full rounded-full transition-all duration-1000'} style={{ width: Math.min(((totals.total_calories || 0) / currentUser.kcal) * 100, 100) + '%' }} />
                 </div>
               </div>
             </div>
@@ -394,26 +242,18 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
               <div className="bg-slate-800 border border-slate-700 rounded-3xl p-5 shadow-lg flex flex-col items-center">
                 <span className="text-xs text-blue-400 font-black uppercase tracking-widest mb-3">🔷 Protein</span>
-                <div className="text-2xl font-black text-white">{Math.round(totals.total_protein || 0)}g <span className="text-sm font-normal text-slate-500">/ {macroGoals.protein}g</span></div>
-                <div className="w-full bg-slate-950 h-2 rounded-full mt-3 overflow-hidden">
-                  <div className="bg-blue-500 h-full transition-all duration-700" style={{ width: Math.min((totals.total_protein / macroGoals.protein) * 100, 100) + '%' }} />
-                </div>
+                <div className="text-2xl font-black text-white">{Math.round(totals.total_protein || 0)}g <span className="text-sm font-normal text-slate-500">/ {currentUser.protein}g</span></div>
+                <div className="w-full bg-slate-950 h-2 rounded-full mt-3 overflow-hidden"><div className="bg-blue-500 h-full transition-all duration-700" style={{ width: Math.min((totals.total_protein / currentUser.protein) * 100, 100) + '%' }} /></div>
               </div>
-
               <div className="bg-slate-800 border border-slate-700 rounded-3xl p-5 shadow-lg flex flex-col items-center">
                 <span className="text-xs text-amber-400 font-black uppercase tracking-widest mb-3">🔶 Kohlenhydrate</span>
-                <div className="text-2xl font-black text-white">{Math.round(totals.total_carbs || 0)}g <span className="text-sm font-normal text-slate-500">/ {macroGoals.carbs}g</span></div>
-                <div className="w-full bg-slate-950 h-2 rounded-full mt-3 overflow-hidden">
-                  <div className="bg-amber-500 h-full transition-all duration-700" style={{ width: Math.min((totals.total_carbs / macroGoals.carbs) * 100, 100) + '%' }} />
-                </div>
+                <div className="text-2xl font-black text-white">{Math.round(totals.total_carbs || 0)}g <span className="text-sm font-normal text-slate-500">/ {currentUser.carbs}g</span></div>
+                <div className="w-full bg-slate-950 h-2 rounded-full mt-3 overflow-hidden"><div className="bg-amber-500 h-full transition-all duration-700" style={{ width: Math.min((totals.total_carbs / currentUser.carbs) * 100, 100) + '%' }} /></div>
               </div>
-
               <div className="bg-slate-800 border border-slate-700 rounded-3xl p-5 shadow-lg flex flex-col items-center">
                 <span className="text-xs text-rose-400 font-black uppercase tracking-widest mb-3">❤️ Fett</span>
-                <div className="text-2xl font-black text-white">{Math.round(totals.total_fat || 0)}g <span className="text-sm font-normal text-slate-500">/ {macroGoals.fat}g</span></div>
-                <div className="w-full bg-slate-950 h-2 rounded-full mt-3 overflow-hidden">
-                  <div className="bg-rose-500 h-full transition-all duration-700" style={{ width: Math.min((totals.total_fat / macroGoals.fat) * 100, 100) + '%' }} />
-                </div>
+                <div className="text-2xl font-black text-white">{Math.round(totals.total_fat || 0)}g <span className="text-sm font-normal text-slate-500">/ {currentUser.fat}g</span></div>
+                <div className="w-full bg-slate-950 h-2 rounded-full mt-3 overflow-hidden"><div className="bg-rose-500 h-full transition-all duration-700" style={{ width: Math.min((totals.total_fat / currentUser.fat) * 100, 100) + '%' }} /></div>
               </div>
             </div>
           </>
@@ -422,14 +262,11 @@ export default function Dashboard() {
         <div className="space-y-4">
           <h2 className="text-xl font-black text-white pl-1">Heute verzehrt</h2>
           {logs.length === 0 ? (
-            <div className="bg-slate-800/50 rounded-3xl border border-slate-700 text-center py-12 shadow-inner">
-              <span className="text-4xl block mb-2">🍽️</span>
-              <p className="text-slate-400 font-medium text-sm">Noch keine Einträge für diesen Benutzer heute.</p>
-            </div>
+            <div className="bg-slate-800/50 rounded-3xl border border-slate-700 text-center py-12 shadow-inner"><p className="text-slate-400 font-medium">Noch keine Einträge heute.</p></div>
           ) : (
             <div className="space-y-3">
               {logs.map((log) => (
-                <div key={log.id} className="bg-slate-800 border border-slate-700/60 rounded-2xl p-4 flex items-center justify-between shadow-md">
+                <div key={log.id} className="bg-slate-800 border border-slate-700/60 rounded-2xl p-4 flex items-center justify-between">
                   <div className="flex-1">
                     <h3 className="font-bold text-white text-base">{log.food_name}</h3>
                     <div className="flex flex-wrap gap-2 mt-1.5 text-xs">
@@ -440,12 +277,7 @@ export default function Dashboard() {
                       <span className="text-rose-400">F: {log.fat.toFixed(1)}g</span>
                     </div>
                   </div>
-                  <button 
-                    onClick={() => handleDeleteLog(log.id)}
-                    className="w-9 h-9 rounded-xl bg-slate-900 text-rose-500 hover:bg-rose-950 flex items-center justify-center font-bold transition-all ml-2"
-                  >
-                    ✕
-                  </button>
+                  <button onClick={() => handleDeleteLog(log.id)} className="w-9 h-9 rounded-xl bg-slate-900 text-rose-500 flex items-center justify-center font-bold ml-2">✕</button>
                 </div>
               ))}
             </div>
@@ -453,78 +285,45 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Die Footer-Signatur */}
       <div className="mt-12 mb-4 text-center">
         <p className="text-xs font-medium text-slate-500">
           Created with ⚡ by <span className="font-black text-slate-400 hover:text-white transition-colors cursor-pointer">CrashBandit82</span>
         </p>
       </div>
 
-      <button 
-        onClick={() => { setSelectedFood(null); setShowAddManual(true); }}
-        className={'fixed bottom-8 right-6 w-16 h-16 bg-gradient-to-r ' + currentUser.color + ' text-white rounded-full shadow-2xl flex items-center justify-center text-3xl font-black hover:scale-110 active:scale-95 transition-all z-30'}
-      >
-        +
-      </button>
+      <button onClick={() => { setSelectedFood(null); setShowAddManual(true); }} className={'fixed bottom-8 right-6 w-16 h-16 bg-gradient-to-r ' + currentUser.color + ' text-white rounded-full shadow-2xl flex items-center justify-center text-3xl font-black z-30'}>+</button>
 
-      {showScanner && (
-        <BarcodeScanner
-          onScan={handleBarcodeScanned}
-          onClose={() => setShowScanner(false)}
-        />
-      )}
+      {showScanner && <BarcodeScanner onScan={handleBarcodeScanned} onClose={() => setShowScanner(false)} />}
 
+      {/* Editor: Namen ändern */}
       {showEditName && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-slate-800 w-full max-w-md rounded-3xl p-6 border border-slate-700 shadow-2xl">
-            <h2 className="text-2xl font-black text-white mb-4">👤 Namen anpassen</h2>
-            <form onSubmit={handleSaveName} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Profil Name eingeben</label>
-                <input 
-                  type="text" 
-                  value={nameInput} 
-                  onChange={e => setNameInput(e.target.value)} 
-                  className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 font-bold outline-none focus:ring-2 focus:ring-blue-500 text-lg" 
-                  placeholder="z.B. Max Mustermann"
-                  maxLength="20"
-                  required 
-                  autoFocus
-                />
-              </div>
+            <h2 className="text-2xl font-black text-white mb-4">👤 Profilname ändern</h2>
+            <form onSubmit={(e) => handleSaveProfile(e, 'name')} className="space-y-4">
+              <input type="text" value={nameInput} onChange={e => setNameInput(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 font-bold outline-none focus:ring-2 focus:ring-blue-500 text-lg" required />
               <div className="flex gap-2 pt-2">
                 <button type="button" onClick={() => setShowEditName(false)} className="flex-1 bg-slate-700 text-white font-bold py-3 rounded-xl">Abbrechen</button>
-                <button type="submit" className={'flex-1 bg-gradient-to-r ' + currentUser.color + ' text-white font-black py-3 rounded-xl shadow-lg'}>Speichern</button>
+                <button type="submit" disabled={apiLoading} className={'flex-1 bg-gradient-to-r ' + currentUser.color + ' text-white font-black py-3 rounded-xl shadow-lg'}>{apiLoading ? 'Speichert...' : 'Online Speichern'}</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
+      {/* Editor: JEDER WERT INDIVIDUELL ANPASSBAR */}
       {showEditGoals && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
           <div className="bg-slate-800 w-full max-w-md rounded-3xl p-6 border border-slate-700 shadow-2xl">
-            <h2 className="text-2xl font-black text-white mb-4">🎯 Tagesziele für {currentUser.name}</h2>
-            <form onSubmit={handleSaveGoals} className="space-y-4">
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Kalorienziel (kcal)</label>
-                <input type="number" value={goalInputKcal} onChange={e => setGoalInputKcal(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2.5 font-bold outline-none focus:ring-2 focus:ring-blue-500" required />
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Protein (g)</label>
-                <input type="number" value={goalInputProtein} onChange={e => setGoalInputProtein(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2.5 font-bold outline-none focus:ring-2 focus:ring-blue-500" required />
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Kohlenhydrate (g)</label>
-                <input type="number" value={goalInputCarbs} onChange={e => setGoalInputCarbs(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2.5 font-bold outline-none focus:ring-2 focus:ring-blue-500" required />
-              </div>
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Fett (g)</label>
-                <input type="number" value={goalInputFat} onChange={e => setGoalInputFat(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2.5 font-bold outline-none focus:ring-2 focus:ring-blue-500" required />
-              </div>
+            <h2 className="text-2xl font-black text-white mb-4">🎯 Ziele für {currentUser.name}</h2>
+            <form onSubmit={(e) => handleSaveProfile(e, 'goals')} className="space-y-4">
+              <div><label className="block text-xs font-bold text-slate-400 mb-1">Kalorienziel (kcal)</label><input type="number" value={goalInputKcal} onChange={e => setGoalInputKcal(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2 font-bold outline-none focus:ring-2 focus:ring-blue-500" required /></div>
+              <div><label className="block text-xs font-bold text-blue-400 mb-1">🔷 Protein-Ziel (g)</label><input type="number" value={goalInputProtein} onChange={e => setGoalInputProtein(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2 font-bold outline-none focus:ring-2 focus:ring-blue-500" required /></div>
+              <div><label className="block text-xs font-bold text-amber-400 mb-1">🔶 Kohlenhydrate-Ziel (g)</label><input type="number" value={goalInputCarbs} onChange={e => setGoalInputCarbs(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2 font-bold outline-none focus:ring-2 focus:ring-blue-500" required /></div>
+              <div><label className="block text-xs font-bold text-rose-400 mb-1">❤️ Fett-Ziel (g)</label><input type="number" value={goalInputFat} onChange={e => setGoalInputFat(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-2 font-bold outline-none focus:ring-2 focus:ring-blue-500" required /></div>
               <div className="flex gap-2 pt-2">
                 <button type="button" onClick={() => setShowEditGoals(false)} className="flex-1 bg-slate-700 text-white font-bold py-3 rounded-xl">Abbrechen</button>
-                <button type="submit" className={'flex-1 bg-gradient-to-r ' + currentUser.color + ' text-white font-black py-3 rounded-xl shadow-lg'}>Speichern</button>
+                <button type="submit" disabled={apiLoading} className={'flex-1 bg-gradient-to-r ' + currentUser.color + ' text-white font-black py-3 rounded-xl shadow-lg'}>{apiLoading ? 'Speichert...' : 'Online Speichern'}</button>
               </div>
             </form>
           </div>
@@ -533,124 +332,32 @@ export default function Dashboard() {
 
       {showAddManual && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-40 flex items-end justify-center">
-          <div className="bg-slate-800 w-full max-w-lg rounded-t-3xl p-6 shadow-2xl safe-bottom border-t border-slate-700 max-h-[90vh] overflow-y-auto">
-            
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-2xl font-black text-white">Mahlzeit hinzufügen</h2>
-              <button onClick={() => setShowAddManual(false)} className="text-slate-400 text-xl font-bold p-1">✕</button>
-            </div>
-
+          <div className="bg-slate-800 w-full max-w-lg rounded-t-3xl p-6 shadow-2xl safe-bottom max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4"><h2 className="text-2xl font-black text-white">Mahlzeit</h2><button onClick={() => setShowAddManual(false)} className="text-slate-400 text-xl">✕</button></div>
             {!selectedFood && (
-              <div className="flex bg-slate-900 p-1 rounded-xl mb-4 border border-slate-700">
-                <button 
-                  onClick={() => setActiveTab('search')}
-                  className={`flex-1 py-2 rounded-lg font-black text-sm transition-all ${activeTab === 'search' ? 'bg-slate-700 text-white shadow' : 'text-slate-400'}`}
-                >
-                  🔍 Lokale Liste suchen
-                </button>
-                <button 
-                  onClick={() => setActiveTab('custom')}
-                  className={`flex-1 py-2 rounded-lg font-black text-sm transition-all ${activeTab === 'custom' ? 'bg-slate-700 text-white shadow' : 'text-slate-400'}`}
-                >
-                  ✍️ Komplett Frei eintragen
-                </button>
-              </div>
+              <div className="flex bg-slate-900 p-1 rounded-xl mb-4"><button onClick={() => setActiveTab('search')} className={`flex-1 py-2 rounded-lg font-black text-sm ${activeTab === 'search' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}>🔍 DB Suchen</button><button onClick={() => setActiveTab('custom')} className={`flex-1 py-2 rounded-lg font-black text-sm ${activeTab === 'custom' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}>✍️ Frei Eintragen</button></div>
             )}
-
             {selectedFood ? (
               <div className="space-y-4">
-                <div className="bg-slate-900 p-4 rounded-xl border border-slate-700">
-                  <h3 className="font-bold text-white text-lg">{selectedFood.name}</h3>
-                  {selectedFood.brand && <p className="text-xs text-slate-400">{selectedFood.brand}</p>}
-                  <p className="text-xs text-amber-400 font-bold mt-1">{Math.round(selectedFood.calories_per_100g)} kcal / 100g</p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">Menge in Gramm</label>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    placeholder="z.B. 150"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    className="w-full text-xl font-bold bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 outline-none"
-                    autoFocus
-                  />
-                </div>
-
-                {amount && (
-                  <div className="bg-slate-900 p-4 rounded-xl border border-slate-700 grid grid-cols-4 gap-2 text-center">
-                    <div><p className="text-lg font-black text-white">{((selectedFood.calories_per_100g / 100) * parseFloat(amount)).toFixed(0)}</p><p className="text-[10px] text-slate-400 uppercase">kcal</p></div>
-                    <div><p className="text-lg font-black text-blue-400">{((selectedFood.protein_per_100g / 100) * parseFloat(amount)).toFixed(1)}</p><p className="text-[10px] text-slate-400 uppercase">Prot</p></div>
-                    <div><p className="text-lg font-black text-amber-400">{((selectedFood.carbs_per_100g / 100) * parseFloat(amount)).toFixed(1)}</p><p className="text-[10px] text-slate-400 uppercase">Khd</p></div>
-                    <div><p className="text-lg font-black text-rose-400">{((selectedFood.fat_per_100g / 100) * parseFloat(amount)).toFixed(1)}</p><p className="text-[10px] text-slate-400 uppercase">Fett</p></div>
-                  </div>
-                )}
-
-                <div className="flex gap-2">
-                  <button onClick={() => setSelectedFood(null)} className="flex-1 bg-slate-700 text-white font-bold py-3.5 rounded-xl">Zurück</button>
-                  <button onClick={handleAddMeal} disabled={!amount || apiLoading} className={'flex-1 bg-gradient-to-r ' + currentUser.color + ' text-white font-black py-3.5 rounded-xl'}>
-                    {apiLoading ? 'Speichert...' : 'Eintragen'}
-                  </button>
-                </div>
+                <div className="bg-slate-900 p-4 rounded-xl"><h3 className="font-bold text-white text-lg">{selectedFood.name}</h3><p className="text-xs text-amber-400 font-bold mt-1">{Math.round(selectedFood.calories_per_100g)} kcal / 100g</p></div>
+                <input type="number" placeholder="Menge in Gramm" value={amount} onChange={e => setAmount(e.target.value)} className="w-full text-xl font-bold bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3" autoFocus />
+                <div className="flex gap-2"><button onClick={() => setSelectedFood(null)} className="flex-1 bg-slate-700 text-white font-bold py-3 rounded-xl">Zurück</button><button onClick={handleAddMeal} disabled={!amount || apiLoading} className={'flex-1 bg-gradient-to-r ' + currentUser.color + ' text-white font-black py-3 rounded-xl'}>Eintragen</button></div>
               </div>
             ) : activeTab === 'search' ? (
               <div className="space-y-4">
-                <input
-                  type="text"
-                  placeholder="Lebensmittel aus Server-DB filtern..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-blue-500"
-                />
+                <input type="text" placeholder="Suchen..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-4 py-3" />
                 <div className="max-h-[40vh] overflow-y-auto space-y-2 pr-1">
-                  {foods
-                    .filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
-                    .map(f => (
-                      <button
-                        key={f.id}
-                        onClick={() => { setSelectedFood(f); setAmount(''); }}
-                        className="w-full bg-slate-900/60 border border-slate-700/60 hover:border-slate-500 rounded-xl p-3 text-left transition-all"
-                      >
-                        <div className="font-bold text-white text-sm">{f.name}</div>
-                        <div className="text-xs text-slate-400 mt-0.5">{Math.round(f.calories_per_100g)} kcal pro 100g</div>
-                      </button>
-                    ))}
+                  {foods.filter(f => f.name.toLowerCase().includes(searchQuery.toLowerCase())).map(f => (
+                    <button key={f.id} onClick={() => { setSelectedFood(f); setAmount(''); }} className="w-full bg-slate-900/60 rounded-xl p-3 text-left"><div className="font-bold text-white">{f.name}</div></button>
+                  ))}
                 </div>
               </div>
             ) : (
               <form onSubmit={handleCreateCustomMeal} className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Mahlzeit Name</label>
-                  <input type="text" placeholder="z.B. Große Pizza Salami" value={customName} onChange={e => setCustomName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm outline-none" required />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Portion Gewicht (g)</label>
-                    <input type="number" placeholder="z.B. 400" value={customAmount} onChange={e => setCustomAmount(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm outline-none" required />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Kalorien gesamt (kcal)</label>
-                    <input type="number" placeholder="z.B. 950" value={customKcal} onChange={e => setCustomKcal(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm outline-none" required />
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Protein gesamt (g)</label>
-                    <input type="number" step="0.1" placeholder="Optional" value={customProtein} onChange={e => setCustomProtein(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Kohlenh. gesamt (g)</label>
-                    <input type="number" step="0.1" placeholder="Optional" value={customCarbs} onChange={e => setCustomCarbs(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase mb-1">Fett gesamt (g)</label>
-                    <input type="number" step="0.1" placeholder="Optional" value={customFat} onChange={e => setCustomFat(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm outline-none" />
-                  </div>
-                </div>
-                <button type="submit" disabled={apiLoading} className={'w-full mt-3 bg-gradient-to-r ' + currentUser.color + ' text-white font-black py-3.5 rounded-xl shadow-lg'}>
-                  {apiLoading ? 'Speichert...' : 'Dauerhaft in Server-DB speichern & eintragen'}
-                </button>
+                <input type="text" placeholder="Mahlzeit Name" value={customName} onChange={e => setCustomName(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2" required />
+                <div className="grid grid-cols-2 gap-2"><input type="number" placeholder="Gewicht (g)" value={customAmount} onChange={e => setCustomAmount(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2" required /><input type="number" placeholder="Kcal" value={customKcal} onChange={e => setCustomKcal(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2" required /></div>
+                <div className="grid grid-cols-3 gap-2"><input type="number" placeholder="Protein" value={customProtein} onChange={e => setCustomProtein(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2" /><input type="number" placeholder="Khd" value={customCarbs} onChange={e => setCustomCarbs(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2" /><input type="number" placeholder="Fett" value={customFat} onChange={e => setCustomFat(e.target.value)} className="w-full bg-slate-900 border border-slate-700 text-white rounded-xl px-3 py-2" /></div>
+                <button type="submit" disabled={apiLoading} className={'w-full mt-3 bg-gradient-to-r ' + currentUser.color + ' text-white font-black py-3.5 rounded-xl'}>{apiLoading ? 'Speichert...' : 'Online Speichern & Eintragen'}</button>
               </form>
             )}
           </div>
